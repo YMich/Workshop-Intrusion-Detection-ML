@@ -1,0 +1,54 @@
+{
+  "RF": {
+    "n_estimators": 256,
+    "criterion": "gini",
+    "max_depth": null,
+    "min_samples_split": 2,
+    "min_samples_leaf": 2,
+    "max_features": "sqrt",
+    "bootstrap": true
+  },
+  "LSTM": {
+    "sequence_length": 20,
+    "lstm_units": [
+      32
+    ],
+    "dense_units": 32,
+    "dropout_rate": 0.2,
+    "learning_rate": 0.001,
+    "batch_size": 128,
+    "l2_regularization": 1e-05,
+    "train_sequence_stride": 5,
+    "eval_sequence_stride": 1
+  },
+  "LITEMV": {
+    "sequence_length": 40,
+    "n_filters": 32,
+    "kernel_size": 40,
+    "conv_stride": 1,
+    "learning_rate": 0.001,
+    "batch_size": 64,
+    "train_sequence_stride": 5,
+    "eval_sequence_stride": 1
+  },
+  "AE": {
+    "encoder_hidden_dims": [
+      64,
+      32
+    ],
+    "bottleneck_dim": 4,
+    "learning_rate": 0.002,
+    "loss": "mse",
+    "l2_regularization": 1e-05,
+    "denoising_noise_std": 0.0,
+    "batch_size": 256,
+    "anomaly_score": "top5_mse"
+  },
+  "IF": {
+    "n_estimators": 200,
+    "max_samples": 512,
+    "max_features": 1.0,
+    "bootstrap": false,
+    "contamination": "auto"
+  }
+}

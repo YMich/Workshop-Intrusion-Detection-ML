@@ -1,0 +1,301 @@
+--- /mnt/data/lstm(20260911-125525).py	2026-09-11 12:57:27.092407889 +0000
++++ /mnt/data/o1_update/o1_lstm_feature_pruning/lstm.py	2026-09-11 13:29:40.572917499 +0000
+@@ -76,11 +76,19 @@
+ }
+ BENCHMARK_DATASETS = tuple(DATASET_PATHS.keys())
+ 
+-ARTIFACT_ROOT = PROJECT_ROOT / "artifacts" / "models_same_hyper" / "LSTM"
+-RESULT_ROOT = PROJECT_ROOT / "results" / "models_same_hyper" / "LSTM"
++# Baseline locations are read-only inputs for Optimization 1.
++BASELINE_ARTIFACT_ROOT = PROJECT_ROOT / "artifacts" / "models_same_hyper" / "LSTM"
++BASELINE_RESULT_ROOT = PROJECT_ROOT / "results" / "models_same_hyper" / "LSTM"
++
++# Keep Optimization-1 outputs separate so the baseline remains reproducible.
++OPTIMIZATION_NAME = "optimization_1_brittle_feature_removal"
++ARTIFACT_ROOT = BASELINE_ARTIFACT_ROOT / OPTIMIZATION_NAME
++RESULT_ROOT = BASELINE_RESULT_ROOT / OPTIMIZATION_NAME
+ SHARED_SPLIT_ROOT = PROJECT_ROOT / "artifacts" / "splits"
+-SHARED_HYPERPARAMETER_PATH = ARTIFACT_ROOT / "shared_best_hyperparameters.json"
+-SHARED_SEARCH_RESULT_DIR = RESULT_ROOT / "shared_batch_size_selection"
++
++# O1 must reuse the exact shared hyperparameters selected for the baseline.
++SHARED_HYPERPARAMETER_PATH = BASELINE_ARTIFACT_ROOT / "shared_best_hyperparameters.json"
++SHARED_SEARCH_RESULT_DIR = BASELINE_RESULT_ROOT / "shared_batch_size_selection"
+ 
+ 
+ # ============================================================
+@@ -117,7 +125,55 @@
+ 
+ BENIGN_LABEL = 0
+ MALICIOUS_LABEL = 1
+-EXPECTED_FEATURE_COUNT = 57
++
++# Optimization 1: remove features identified as brittle/environment-dependent.
++#
++# The only flag-related feature allowed to remain is the exact aggregate
++# ``URG Flag Count`` feature, if it exists in the selected schema. Every other
++# feature whose name contains ``Flag`` is removed. This covers aggregate
++# SYN/FIN/ACK/PSH/RST/ECE/CWR counts as well as all Fwd/Bwd-specific flag fields.
++MANDATORY_BRITTLE_FEATURES_TO_DROP = (
++    "FWD Init Win Bytes",
++    "Bwd Init Win Bytes",
++    "Total Connection Flow Time",
++    "Fwd Header Length",
++    "Bwd Header Length",
++)
++
++FLAG_FEATURE_ALLOWED_TO_REMAIN = "URG Flag Count"
++BASELINE_EXPECTED_FEATURE_COUNT = 57
++
++
++def is_flag_feature_to_drop(feature_name: str) -> bool:
++    """Drop every flag-related feature except the exact aggregate URG Flag Count."""
++    normalized = " ".join(str(feature_name).strip().split()).casefold()
++    allowed = FLAG_FEATURE_ALLOWED_TO_REMAIN.casefold()
++    return ("flag" in normalized) and (normalized != allowed)
++
++
++def resolve_brittle_features_to_drop(
++    baseline_selected_features: list[str],
++) -> list[str]:
++    """Resolve the exact O1 drop list against the baseline-selected schema."""
++    missing_mandatory = [
++        feature
++        for feature in MANDATORY_BRITTLE_FEATURES_TO_DROP
++        if feature not in baseline_selected_features
++    ]
++    if missing_mandatory:
++        raise ValueError(
++            "O1 requires all mandatory brittle features to be present before "
++            f"pruning; missing: {missing_mandatory}"
++        )
++
++    return [
++        feature
++        for feature in baseline_selected_features
++        if (
++            feature in MANDATORY_BRITTLE_FEATURES_TO_DROP
++            or is_flag_feature_to_drop(feature)
++        )
++    ]
+ 
+ 
+ # ============================================================
+@@ -260,23 +316,70 @@
+     dataset_name: str,
+     expected_features: list[str] | None = None,
+ ):
++    """Apply baseline preprocessing/selection, then O1 brittle-feature pruning.
++
++    Feature pruning happens only after the unchanged Step-2 preprocessing and
++    Step-3 feature-selection logic. RobustScaler is feature-wise, so fitting it
++    on the baseline schema does not let a dropped feature influence a retained
++    feature. The mandatory brittle columns plus every direction-specific TCP
++    flag field are then excluded from every LSTM tensor.
++    """
+     normalized = preprocessor.transform(df)
+ 
+     (
+         selected_df,
+-        selected_features,
++        baseline_selected_features,
+         _dropped,
+         _manifest,
+     ) = select_and_engineer_dataset(
+         dataset_name=dataset_name,
+         df=normalized,
+-        expected_selected_features=expected_features,
++        # O1 validates the pruned schema itself below. Passing the reduced O1
++        # schema into the unchanged baseline selector would incorrectly compare
++        # it against the selector's 57-feature output.
++        expected_selected_features=None,
++    )
++
++    if len(baseline_selected_features) != BASELINE_EXPECTED_FEATURE_COUNT:
++        raise ValueError(
++            f"{dataset_name}: expected {BASELINE_EXPECTED_FEATURE_COUNT} baseline "
++            f"selected features before O1 pruning, got "
++            f"{len(baseline_selected_features)}."
++        )
++
++    try:
++        brittle_features_to_drop = resolve_brittle_features_to_drop(
++            baseline_selected_features
++        )
++    except ValueError as exc:
++        raise ValueError(f"{dataset_name}: {exc}") from exc
++
++    selected_features = [
++        feature
++        for feature in baseline_selected_features
++        if feature not in brittle_features_to_drop
++    ]
++    selected_df = selected_df.drop(
++        columns=brittle_features_to_drop,
++        errors="raise",
+     )
+ 
+-    if len(selected_features) != EXPECTED_FEATURE_COUNT:
++    expected_feature_count = (
++        BASELINE_EXPECTED_FEATURE_COUNT - len(brittle_features_to_drop)
++    )
++    if len(selected_features) != expected_feature_count:
+         raise ValueError(
+-            f"{dataset_name}: expected {EXPECTED_FEATURE_COUNT} selected "
+-            f"features, got {len(selected_features)}."
++            f"{dataset_name}: expected {expected_feature_count} selected "
++            f"features after O1 pruning, got {len(selected_features)}."
++        )
++
++    if expected_features is not None and selected_features != expected_features:
++        missing = [f for f in expected_features if f not in selected_features]
++        extra = [f for f in selected_features if f not in expected_features]
++        raise ValueError(
++            f"{dataset_name}: O1 feature schema differs from the training schema. "
++            f"Missing={missing}; Extra={extra}; "
++            f"OrderMatches={selected_features == expected_features}"
+         )
+ 
+     return selected_df, selected_features
+@@ -1189,7 +1292,7 @@
+     train_df: pd.DataFrame,
+     validation_df: pd.DataFrame,
+     best_params: dict,
+-    expected_features: list[str],
++    expected_features: list[str] | None = None,
+ ):
+     """
+     Final model is trained on TRAIN only and uses VALIDATION only for:
+@@ -1560,14 +1663,23 @@
+         json.dump(
+             {
+                 "model": "supervised LSTM sequence classifier",
++                "optimization_stage": "O1_brittle_feature_removal",
++                "mandatory_dropped_features": list(
++                    MANDATORY_BRITTLE_FEATURES_TO_DROP
++                ),
++                "flag_drop_rule": (
++                    "drop every selected flag-related feature except the exact "
++                    "aggregate URG Flag Count feature, if present"
++                ),
++                "flag_feature_allowed_to_remain": FLAG_FEATURE_ALLOWED_TO_REMAIN,
++                "final_selected_feature_count": int(len(final["selected_features"])),
+                 "benchmark_datasets": list(BENCHMARK_DATASETS),
+                 "hyperparameter_scope": "shared across Dataset 2 and Dataset 3",
+                 "hyperparameter_selection": (
+-                    "prior D2/D3 consensus fixed; batch size jointly selected "
+-                    "from 128 vs 256 across both validation sets and seeds 17/42/73"
++                    "reused unchanged from the completed baseline shared-D2/D3 experiment"
+                 ),
+                 "shared_hyperparameter_artifact": str(SHARED_HYPERPARAMETER_PATH),
+-                "shared_selection_result_dir": str(SHARED_SEARCH_RESULT_DIR),
++                "baseline_shared_selection_result_dir": str(SHARED_SEARCH_RESULT_DIR),
+                 "split_strategy": split_metadata,
+                 "shared_split_manifest": str(
+                     SHARED_SPLIT_ROOT / f"{dataset_name}_source_aware_split.csv"
+@@ -1607,6 +1719,23 @@
+     )
+ 
+ 
++def load_baseline_shared_hyperparameters() -> dict:
++    """Load the exact shared D2/D3 hyperparameters frozen by the baseline."""
++    if not SHARED_HYPERPARAMETER_PATH.exists():
++        raise FileNotFoundError(
++            "Optimization 1 requires the baseline shared hyperparameter artifact: "
++            f"{SHARED_HYPERPARAMETER_PATH}. Run the baseline experiment first."
++        )
++
++    with SHARED_HYPERPARAMETER_PATH.open("r", encoding="utf-8") as handle:
++        params = json.load(handle)
++
++    if "lstm_units" in params:
++        params["lstm_units"] = tuple(int(v) for v in params["lstm_units"])
++
++    return params
++
++
+ # ============================================================
+ # JOINT BENCHMARK TRAINING
+ # ============================================================
+@@ -1640,14 +1769,20 @@
+ 
+ 
+ def train_benchmark_datasets(force_resplit: bool = False) -> None:
+-    """Resolve shared batch size across D2+D3, then train final models."""
++    """Run O1 with the frozen baseline hyperparameters on Dataset 2 + 3."""
+     print("\n" + "=" * 90)
+-    print("LSTM FINAL TRAINING - SHARED HYPERPARAMETERS FOR DATASET 2 + DATASET 3")
++    print("LSTM OPTIMIZATION 1 - BRITTLE FEATURE REMOVAL")
+     print("=" * 90)
+     print(describe_compute_device())
++    print("Mandatory dropped features:")
++    for feature in MANDATORY_BRITTLE_FEATURES_TO_DROP:
++        print(f"  - {feature}")
++    print(
++        "Flag rule: drop every *Flag* feature except exact aggregate "
++        f"{FLAG_FEATURE_ALLOWED_TO_REMAIN!r}, if present."
++    )
+ 
+     dataset_records = {}
+-    dataset_frames = {}
+ 
+     for dataset_name in BENCHMARK_DATASETS:
+         splits, manifest, split_metadata = load_dataset_and_split(
+@@ -1661,25 +1796,18 @@
+             "manifest": manifest,
+             "split_metadata": split_metadata,
+         }
+-        dataset_frames[dataset_name] = {
+-            "train": splits["train"],
+-            "validation": splits["validation"],
+-        }
+ 
+-    print("\nPHASE 1 - FOCUSED SHARED BATCH-SIZE SENSITIVITY + STABILITY")
+-    sensitivity = run_shared_sensitivity_analysis(dataset_frames)
+-    shared_best_params = sensitivity["best_params"]
+-    save_shared_search_outputs(sensitivity)
++    shared_best_params = load_baseline_shared_hyperparameters()
+ 
+-    print("\nSelected SHARED LSTM hyperparameters:")
++    print("\nFrozen baseline SHARED LSTM hyperparameters:")
+     print(f"  sequence_length: {shared_best_params['sequence_length']}")
+     print(f"  lstm_units: {shared_best_params['lstm_units']}")
+     print(f"  dropout_rate: {shared_best_params['dropout_rate']}")
+     print(f"  learning_rate: {shared_best_params['learning_rate']}")
+     print(f"  batch_size: {shared_best_params['batch_size']}")
+-    print(f"  shared artifact: {SHARED_HYPERPARAMETER_PATH}")
++    print(f"  source artifact: {SHARED_HYPERPARAMETER_PATH}")
+ 
+-    print("\nPHASE 2 - FINAL PER-DATASET TRAINING WITH THE SAME HYPERPARAMETERS")
++    selected_schema = None
+ 
+     for dataset_name in BENCHMARK_DATASETS:
+         record = dataset_records[dataset_name]
+@@ -1687,7 +1815,7 @@
+         validation_df = record["splits"]["validation"]
+ 
+         print("\n" + "-" * 90)
+-        print(f"FINAL MODEL - {dataset_name.upper()}")
++        print(f"O1 FINAL MODEL - {dataset_name.upper()}")
+         print("-" * 90)
+ 
+         final = train_final_model(
+@@ -1695,9 +1823,17 @@
+             train_df=train_df,
+             validation_df=validation_df,
+             best_params=shared_best_params,
+-            expected_features=sensitivity["selected_features_by_dataset"][dataset_name],
++            expected_features=selected_schema,
+         )
+ 
++        if selected_schema is None:
++            selected_schema = list(final["selected_features"])
++        elif list(final["selected_features"]) != selected_schema:
++            raise RuntimeError(
++                f"{dataset_name}: O1 selected feature schema differs across datasets."
++            )
++
++        print(f"O1 feature count: {len(final['selected_features'])}")
+         print(
+             f"Selected threshold: {final['calibration']['threshold']:.6f} "
+             f"({final['calibration']['method']}, validation only for {dataset_name})"

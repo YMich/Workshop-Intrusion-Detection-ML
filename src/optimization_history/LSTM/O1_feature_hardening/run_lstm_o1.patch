@@ -1,0 +1,76 @@
+--- /mnt/data/run_lstm(9).py	2026-09-11 12:57:27.788407872 +0000
++++ /mnt/data/o1_update/o1_lstm_feature_pruning/run_lstm.py	2026-09-11 13:15:40.000000000 +0000
+@@ -11,9 +11,9 @@
+ def parse_args():
+     parser = argparse.ArgumentParser(
+         description=(
+-            "Final LSTM experiment on Dataset 2 and Dataset 3 using the prior "
+-            "D2/D3 consensus LSTM configuration and a focused joint batch-size "
+-            "selection, with source-aware 70/15/15 splits and validation-only "
++            "LSTM Optimization 1 on Dataset 2 and Dataset 3: remove brittle "
++            "window/header/connection-time/reset features while reusing the exact "
++            "baseline shared hyperparameters, source-aware split, and validation-only "
+             "threshold calibration."
+         )
+     )
+@@ -23,8 +23,8 @@
+         choices=list(DATASET_PATHS.keys()),
+         default=None,
+         help=(
+-            "Evaluate only one benchmark dataset. Shared hyperparameter tuning "
+-            "always trains on both Dataset 2 and Dataset 3."
++            "Evaluate only one benchmark dataset. O1 training still runs both Dataset 2 "
++            "and Dataset 3 to preserve the shared experiment design."
+         ),
+     )
+ 
+@@ -63,8 +63,8 @@
+ 
+     if args.dataset is not None and not args.evaluation_only:
+         parser.error(
+-            "--dataset can only be used with --evaluation-only. Shared "
+-            "hyperparameter selection requires Dataset 2 and Dataset 3 together."
++            "--dataset can only be used with --evaluation-only. O1 training is executed "
++            "for Dataset 2 and Dataset 3 together."
+         )
+ 
+     return args
+@@ -74,7 +74,7 @@
+     args = parse_args()
+ 
+     print("=" * 90)
+-    print("LSTM - D2/D3 SHARED-HYPERPARAMETER HOLDOUT EXPERIMENT")
++    print("LSTM O1 - BRITTLE FEATURE REMOVAL")
+     print("=" * 90)
+     print(describe_compute_device())
+     print(
+@@ -82,9 +82,8 @@
+         "that source is split chronologically 70/15/15."
+     )
+     print(
+-        "Hyperparameter rule: prior D2/D3 consensus values are fixed; only "
+-        "batch_size={128,256} is re-evaluated jointly on D2 + D3 validation "
+-        "across seeds 17/42/73 with equal dataset weighting."
++        "Hyperparameter rule: reuse the exact baseline shared D2/D3 hyperparameters; "
++        "no hyperparameter is re-tuned in O1."
+     )
+     print(
+         "Threshold rule: calibrated separately per dataset on validation only; "
+@@ -92,7 +91,7 @@
+     )
+ 
+     if not args.evaluation_only:
+-        print("\nPHASE 1 - TRAINING / VALIDATION / THRESHOLD CALIBRATION")
++        print("\nPHASE 1 - O1 TRAINING / VALIDATION / THRESHOLD CALIBRATION")
+         train_all_datasets(
+             force_resplit=args.force_resplit,
+         )
+@@ -101,7 +100,7 @@
+         print("\nTraining complete; test evaluation skipped by request.")
+         return
+ 
+-    print("\nPHASE 2 - FINAL TEST EVALUATION")
++    print("\nPHASE 2 - O1 FINAL TEST EVALUATION")
+     summary = evaluate_all_datasets(only_dataset=args.dataset)
+ 
+     print("\n" + "=" * 90)

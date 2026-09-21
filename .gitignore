@@ -1,0 +1,73 @@
+# -------------------------------------------------------------------
+# Large datasets - distributed through Google Drive, not GitHub
+# -------------------------------------------------------------------
+data/raw/*
+data/ingested/*
+
+# Preserve documented empty directories
+!data/raw/.gitkeep
+!data/ingested/.gitkeep
+!data/README.md
+
+# -------------------------------------------------------------------
+# Frozen artifacts/results - distributed through Google Drive
+# -------------------------------------------------------------------
+model_artifacts/
+results/
+
+# -------------------------------------------------------------------
+# Python environments and cache
+# -------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+ENV/
+
+# -------------------------------------------------------------------
+# TensorFlow / model checkpoints accidentally created locally
+# -------------------------------------------------------------------
+*.h5
+*.keras
+*.joblib
+*.pkl
+*.pickle
+*.ckpt
+checkpoint
+
+# -------------------------------------------------------------------
+# Large network/data files
+# -------------------------------------------------------------------
+*.pcap
+*.pcapng
+*.cap
+
+# CSVs under data are already ignored above. Do not globally ignore
+# CSV because small schemas/results used by source-code experiments
+# may intentionally belong in the repository.
+
+# -------------------------------------------------------------------
+# IDE / OS
+# -------------------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# -------------------------------------------------------------------
+# Logs and temporary files
+# -------------------------------------------------------------------
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+~$*

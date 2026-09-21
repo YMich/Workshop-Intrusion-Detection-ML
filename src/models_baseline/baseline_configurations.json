@@ -1,0 +1,57 @@
+{
+  "configuration_mode": "fixed_shared_baselines_no_hyperparameter_search",
+  "datasets": [
+    "dataset2",
+    "dataset3"
+  ],
+  "models": {
+    "RandomForest": {
+      "n_estimators": 128,
+      "max_depth": 10,
+      "min_samples_leaf": 1,
+      "max_features": 0.5,
+      "bootstrap": true
+    },
+    "LITEMV": {
+      "sequence_length": 40,
+      "n_filters": 32,
+      "kernel_size": 40,
+      "conv_stride": 1,
+      "learning_rate": 0.001,
+      "batch_size": 64,
+      "train_sequence_stride": 5,
+      "eval_sequence_stride": 1
+    },
+    "Autoencoder": {
+      "encoder_hidden_dims": [
+        64,
+        32
+      ],
+      "bottleneck_dim": 8,
+      "learning_rate": 0.002,
+      "loss": "huber",
+      "l2_regularization": 1e-05,
+      "denoising_noise_std": 0.02,
+      "batch_size": 256,
+      "anomaly_score": "top5_mse"
+    },
+    "LSTM": {
+      "sequence_length": 20,
+      "lstm_units": [
+        32
+      ],
+      "dense_units": 32,
+      "dropout_rate": 0.2,
+      "learning_rate": 0.001,
+      "batch_size": 128,
+      "l2_regularization": 1e-05
+    },
+    "IsolationForest": {
+      "n_estimators": 200,
+      "max_samples": 512,
+      "max_features": 1.0,
+      "bootstrap": false,
+      "contamination": "auto"
+    }
+  }
+}
